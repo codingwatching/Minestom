@@ -1,33 +1,25 @@
 package net.minestom.server.network.packet.server.play;
 
-import net.minestom.server.network.ConnectionState;
 import net.minestom.server.network.NetworkBuffer;
 import net.minestom.server.network.packet.server.ServerPacket;
-import net.minestom.server.network.packet.server.ServerPacketIdentifier;
-import net.minestom.server.utils.PacketUtils;
 import org.jetbrains.annotations.NotNull;
 
 import static net.minestom.server.network.NetworkBuffer.BYTE;
 import static net.minestom.server.network.NetworkBuffer.VAR_INT;
 
-public record EntityAnimationPacket(int entityId, @NotNull Animation animation) implements ServerPacket {
-    public EntityAnimationPacket(@NotNull NetworkBuffer reader) {
-        this(reader.read(VAR_INT), Animation.values()[reader.read(BYTE)]);
-    }
+public record EntityAnimationPacket(int entityId, @NotNull Animation animation) implements ServerPacket.Play {
+    public static final NetworkBuffer.Type<EntityAnimationPacket> SERIALIZER = new NetworkBuffer.Type<>() {
+        @Override
+        public void write(@NotNull NetworkBuffer buffer, EntityAnimationPacket value) {
+            buffer.write(VAR_INT, value.entityId);
+            buffer.write(BYTE, (byte) value.animation.ordinal());
+        }
 
-    @Override
-    public void write(@NotNull NetworkBuffer writer) {
-        writer.write(VAR_INT, entityId);
-        writer.write(BYTE, (byte) animation.ordinal());
-    }
-
-    @Override
-    public int getId(@NotNull ConnectionState state) {
-        return switch (state) {
-            case PLAY -> ServerPacketIdentifier.ENTITY_ANIMATION;
-            default -> PacketUtils.invalidPacketState(getClass(), state, ConnectionState.PLAY);
-        };
-    }
+        @Override
+        public EntityAnimationPacket read(@NotNull NetworkBuffer buffer) {
+            return new EntityAnimationPacket(buffer.read(VAR_INT), Animation.values()[buffer.read(BYTE)]);
+        }
+    };
 
     public enum Animation {
         SWING_MAIN_ARM,

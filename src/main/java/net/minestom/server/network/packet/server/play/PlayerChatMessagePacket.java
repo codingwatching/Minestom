@@ -3,12 +3,9 @@ package net.minestom.server.network.packet.server.play;
 import net.kyori.adventure.text.Component;
 import net.minestom.server.crypto.FilterMask;
 import net.minestom.server.crypto.SignedMessageBody;
-import net.minestom.server.network.ConnectionState;
 import net.minestom.server.network.NetworkBuffer;
-import net.minestom.server.network.packet.server.ComponentHoldingServerPacket;
+import net.minestom.server.network.NetworkBufferTemplate;
 import net.minestom.server.network.packet.server.ServerPacket;
-import net.minestom.server.network.packet.server.ServerPacketIdentifier;
-import net.minestom.server.utils.PacketUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -27,35 +24,20 @@ public record PlayerChatMessagePacket(UUID sender, int index, byte @Nullable [] 
                                       SignedMessageBody.@NotNull Packed messageBody,
                                       @Nullable Component unsignedContent, FilterMask filterMask,
                                       int msgTypeId, Component msgTypeName,
-                                      @Nullable Component msgTypeTarget) implements ComponentHoldingServerPacket {
-    public PlayerChatMessagePacket(@NotNull NetworkBuffer reader) {
-        this(reader.read(UUID), reader.read(VAR_INT), reader.readOptional(r -> r.readBytes(256)),
-                new SignedMessageBody.Packed(reader),
-                reader.readOptional(COMPONENT), new FilterMask(reader),
-                reader.read(VAR_INT), reader.read(COMPONENT),
-                reader.readOptional(COMPONENT));
-    }
+                                      @Nullable Component msgTypeTarget) implements ServerPacket.Play, ServerPacket.ComponentHolding {
 
-    @Override
-    public void write(@NotNull NetworkBuffer writer) {
-        writer.write(UUID, sender);
-        writer.write(VAR_INT, index);
-        writer.writeOptional(RAW_BYTES, signature);
-        writer.write(messageBody);
-        writer.writeOptional(COMPONENT, unsignedContent);
-        writer.write(filterMask);
-        writer.write(VAR_INT, msgTypeId);
-        writer.write(COMPONENT, msgTypeName);
-        writer.writeOptional(COMPONENT, msgTypeTarget);
-    }
-
-    @Override
-    public int getId(@NotNull ConnectionState state) {
-        return switch (state) {
-            case PLAY -> ServerPacketIdentifier.PLAYER_CHAT;
-            default -> PacketUtils.invalidPacketState(getClass(), state, ConnectionState.PLAY);
-        };
-    }
+    public static final NetworkBuffer.Type<PlayerChatMessagePacket> SERIALIZER = NetworkBufferTemplate.template(
+            UUID, PlayerChatMessagePacket::sender,
+            VAR_INT, PlayerChatMessagePacket::index,
+            RAW_BYTES.optional(), PlayerChatMessagePacket::signature,
+            SignedMessageBody.Packed.SERIALIZER, PlayerChatMessagePacket::messageBody,
+            COMPONENT.optional(), PlayerChatMessagePacket::unsignedContent,
+            FilterMask.SERIALIZER, PlayerChatMessagePacket::filterMask,
+            VAR_INT, PlayerChatMessagePacket::msgTypeId,
+            COMPONENT, PlayerChatMessagePacket::msgTypeName,
+            COMPONENT, PlayerChatMessagePacket::msgTypeTarget,
+            PlayerChatMessagePacket::new
+    );
 
     @Override
     public @NotNull Collection<Component> components() {

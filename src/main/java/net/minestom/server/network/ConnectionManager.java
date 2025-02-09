@@ -3,52 +3,62 @@ package net.minestom.server.network;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.minestom.server.MinecraftServer;
+import net.minestom.server.ServerFlag;
 import net.minestom.server.entity.Player;
-import net.minestom.server.entity.damage.DamageType;
 import net.minestom.server.event.EventDispatcher;
 import net.minestom.server.event.player.AsyncPlayerConfigurationEvent;
 import net.minestom.server.event.player.AsyncPlayerPreLoginEvent;
 import net.minestom.server.instance.Instance;
-import net.minestom.server.message.Messenger;
-import net.minestom.server.network.packet.client.login.ClientLoginStartPacket;
+import net.minestom.server.listener.preplay.LoginListener;
+import net.minestom.server.network.packet.server.CachedPacket;
 import net.minestom.server.network.packet.server.common.KeepAlivePacket;
 import net.minestom.server.network.packet.server.common.PluginMessagePacket;
 import net.minestom.server.network.packet.server.common.TagsPacket;
 import net.minestom.server.network.packet.server.configuration.FinishConfigurationPacket;
-import net.minestom.server.network.packet.server.configuration.RegistryDataPacket;
+import net.minestom.server.network.packet.server.configuration.ResetChatPacket;
+import net.minestom.server.network.packet.server.configuration.SelectKnownPacksPacket;
+import net.minestom.server.network.packet.server.configuration.UpdateEnabledFeaturesPacket;
 import net.minestom.server.network.packet.server.login.LoginSuccessPacket;
 import net.minestom.server.network.packet.server.play.StartConfigurationPacket;
+import net.minestom.server.network.player.GameProfile;
 import net.minestom.server.network.player.PlayerConnection;
 import net.minestom.server.network.player.PlayerSocketConnection;
+import net.minestom.server.network.plugin.LoginPluginMessageProcessor;
+import net.minestom.server.registry.Registries;
+import net.minestom.server.registry.StaticProtocolObject;
 import net.minestom.server.utils.StringUtils;
-import net.minestom.server.utils.async.AsyncUtils;
-import net.minestom.server.utils.debug.DebugUtils;
 import net.minestom.server.utils.validate.Check;
 import org.jctools.queues.MessagePassingQueue;
 import org.jctools.queues.MpscUnboundedArrayQueue;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jglrxavpok.hephaistos.nbt.NBT;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.*;
 import java.util.function.Function;
 
 /**
  * Manages the connected clients.
  */
 public final class ConnectionManager {
-    private static final Logger logger = LoggerFactory.getLogger(ConnectionManager.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(ConnectionManager.class);
 
-    private static final long KEEP_ALIVE_DELAY = 10_000;
-    private static final long KEEP_ALIVE_KICK = 30_000;
     private static final Component TIMEOUT_TEXT = Component.text("Timeout", NamedTextColor.RED);
+    private static final Component SHUTDOWN_TEXT = Component.text("Server shutting down");
 
+    private CachedPacket defaultTags;
+
+    private CachedPacket getDefaultTags(Registries registries) {
+        var defaultTags = this.defaultTags;
+        if (defaultTags == null) {
+            final TagsPacket packet = MinecraftServer.getTagManager().packet(registries);
+            this.defaultTags = defaultTags = new CachedPacket(packet);
+        }
+        return defaultTags;
+    }
 
     // All players once their Player object has been instantiated.
     private final Map<PlayerConnection, Player> connectionPlayerMap = new ConcurrentHashMap<>();
@@ -68,9 +78,6 @@ public final class ConnectionManager {
     private final Set<Player> unmodifiableConfigurationPlayers = Collections.unmodifiableSet(configurationPlayers);
     private final Set<Player> unmodifiablePlayPlayers = Collections.unmodifiableSet(playPlayers);
 
-
-    // The uuid provider once a player login
-    private volatile UuidProvider uuidProvider = (playerConnection, username) -> UUID.randomUUID();
     // The player provider to have your own Player implementation
     private volatile PlayerProvider playerProvider = Player::new;
 
@@ -164,35 +171,6 @@ public final class ConnectionManager {
     }
 
     /**
-     * Changes how {@link UUID} are attributed to players.
-     * <p>
-     * Shouldn't be override if already defined.
-     * <p>
-     * Be aware that it is possible for an UUID provider to be ignored, for example in the case of a proxy (eg: velocity).
-     *
-     * @param uuidProvider the new player connection uuid provider,
-     *                     setting it to null would apply a random UUID for each player connection
-     * @see #getPlayerConnectionUuid(PlayerConnection, String)
-     */
-    public void setUuidProvider(@Nullable UuidProvider uuidProvider) {
-        this.uuidProvider = uuidProvider != null ? uuidProvider : (playerConnection, username) -> UUID.randomUUID();
-    }
-
-    /**
-     * Computes the UUID of the specified connection.
-     * Used in {@link ClientLoginStartPacket} in order
-     * to give the player the right {@link UUID}.
-     *
-     * @param playerConnection the player connection
-     * @param username         the username given by the connection
-     * @return the uuid based on {@code playerConnection}
-     * return a random UUID if no UUID provider is defined see {@link #setUuidProvider(UuidProvider)}
-     */
-    public @NotNull UUID getPlayerConnectionUuid(@NotNull PlayerConnection playerConnection, @NotNull String username) {
-        return uuidProvider.provide(playerConnection, username);
-    }
-
-    /**
      * Changes the {@link Player} provider, to change which object to link to him.
      *
      * @param playerProvider the new {@link PlayerProvider}, can be set to null to apply the default provider
@@ -201,51 +179,38 @@ public final class ConnectionManager {
         this.playerProvider = playerProvider != null ? playerProvider : Player::new;
     }
 
-    /**
-     * Creates a player object and begins the transition from the login state to the config state.
-     */
     @ApiStatus.Internal
-    public @NotNull Player createPlayer(@NotNull PlayerConnection connection, @NotNull UUID uuid, @NotNull String username) {
-        final Player player = playerProvider.createPlayer(uuid, username, connection);
+    public @NotNull Player createPlayer(@NotNull PlayerConnection connection, @NotNull GameProfile gameProfile) {
+        assert ServerFlag.INSIDE_TEST || Thread.currentThread().isVirtual();
+        final Player player = playerProvider.createPlayer(connection, gameProfile);
         this.connectionPlayerMap.put(connection, player);
-        var future = transitionLoginToConfig(player);
-        if (DebugUtils.INSIDE_TEST) future.join();
         return player;
     }
 
-    @ApiStatus.Internal
-    public @NotNull CompletableFuture<Void> transitionLoginToConfig(@NotNull Player player) {
-        return AsyncUtils.runAsync(() -> {
-            final PlayerConnection playerConnection = player.getPlayerConnection();
-
-            // Compression
-            if (playerConnection instanceof PlayerSocketConnection socketConnection) {
-                final int threshold = MinecraftServer.getCompressionThreshold();
-                if (threshold > 0) socketConnection.startCompression();
-            }
-
-            // Call pre login event
-            AsyncPlayerPreLoginEvent asyncPlayerPreLoginEvent = new AsyncPlayerPreLoginEvent(player);
-            EventDispatcher.call(asyncPlayerPreLoginEvent);
-            if (!player.isOnline())
-                return; // Player has been kicked
-
-            // Change UUID/Username based on the event
-            {
-                final String eventUsername = asyncPlayerPreLoginEvent.getUsername();
-                final UUID eventUuid = asyncPlayerPreLoginEvent.getPlayerUuid();
-                if (!player.getUsername().equals(eventUsername)) {
-                    player.setUsernameField(eventUsername);
-                }
-                if (!player.getUuid().equals(eventUuid)) {
-                    player.setUuid(eventUuid);
-                }
-            }
-
-            // Send login success packet (and switch to configuration phase)
-            LoginSuccessPacket loginSuccessPacket = new LoginSuccessPacket(player.getUuid(), player.getUsername(), 0);
-            playerConnection.sendPacket(loginSuccessPacket);
-        });
+    public GameProfile transitionLoginToConfig(@NotNull PlayerConnection connection, @NotNull GameProfile gameProfile) {
+        assert ServerFlag.INSIDE_TEST || Thread.currentThread().isVirtual();
+        // Compression
+        if (connection instanceof PlayerSocketConnection socketConnection) {
+            final int threshold = MinecraftServer.getCompressionThreshold();
+            if (threshold > 0) socketConnection.startCompression();
+        }
+        // Call pre login event
+        LoginPluginMessageProcessor pluginMessageProcessor = connection.loginPluginMessageProcessor();
+        AsyncPlayerPreLoginEvent asyncPlayerPreLoginEvent = new AsyncPlayerPreLoginEvent(connection, gameProfile, pluginMessageProcessor);
+        EventDispatcher.call(asyncPlayerPreLoginEvent);
+        if (!connection.isOnline()) return gameProfile; // Player has been kicked
+        // Change UUID/Username based on the event
+        gameProfile = asyncPlayerPreLoginEvent.getGameProfile();
+        // Wait for pending login plugin messages
+        try {
+            pluginMessageProcessor.awaitReplies(ServerFlag.LOGIN_PLUGIN_MESSAGE_TIMEOUT, TimeUnit.MILLISECONDS);
+        } catch (Throwable t) {
+            connection.kick(LoginListener.INVALID_PROXY_RESPONSE);
+            throw new RuntimeException("Error getting replies for login plugin messages", t);
+        }
+        // Send login success packet (and switch to configuration phase)
+        connection.sendPacket(new LoginSuccessPacket(gameProfile));
+        return gameProfile;
     }
 
     @ApiStatus.Internal
@@ -254,47 +219,69 @@ public final class ConnectionManager {
         configurationPlayers.add(player);
     }
 
+    /**
+     * Return value exposed for testing
+     */
     @ApiStatus.Internal
     public void doConfiguration(@NotNull Player player, boolean isFirstConfig) {
+        assert ServerFlag.INSIDE_TEST || Thread.currentThread().isVirtual();
         if (isFirstConfig) {
             configurationPlayers.add(player);
             keepAlivePlayers.add(player);
         }
+        player.sendPacket(PluginMessagePacket.brandPacket(MinecraftServer.getBrandName()));
+        // Request known packs immediately, but don't wait for the response until required (sending registry data).
+        final var knownPacksFuture = player.getPlayerConnection().requestKnownPacks(List.of(SelectKnownPacksPacket.MINECRAFT_CORE));
 
-        player.getPlayerConnection().setConnectionState(ConnectionState.CONFIGURATION);
-        CompletableFuture<Void> configFuture = AsyncUtils.runAsync(() -> {
-            player.sendPacket(PluginMessagePacket.getBrandPacket());
+        var event = new AsyncPlayerConfigurationEvent(player, isFirstConfig);
+        EventDispatcher.call(event);
+        if (!player.isOnline()) return; // Player was kicked during config.
 
-            var event = new AsyncPlayerConfigurationEvent(player, isFirstConfig);
-            EventDispatcher.call(event);
-            if (!player.isOnline()) return; // Player was kicked during config.
+        // send player features that were enabled or disabled during async config event
+        player.sendPacket(new UpdateEnabledFeaturesPacket(event.getFeatureFlags().stream().map(StaticProtocolObject::name).toList()));
 
-            final Instance spawningInstance = event.getSpawningInstance();
-            Check.notNull(spawningInstance, "You need to specify a spawning instance in the AsyncPlayerConfigurationEvent");
+        final Instance spawningInstance = event.getSpawningInstance();
+        Check.notNull(spawningInstance, "You need to specify a spawning instance in the AsyncPlayerConfigurationEvent");
 
-            // Registry data (if it should be sent)
-            if (event.willSendRegistryData()) {
-                var registry = new HashMap<String, NBT>();
-                registry.put("minecraft:chat_type", Messenger.chatRegistry());
-                registry.put("minecraft:dimension_type", MinecraftServer.getDimensionTypeManager().toNBT());
-                registry.put("minecraft:worldgen/biome", MinecraftServer.getBiomeManager().toNBT());
-                registry.put("minecraft:damage_type", DamageType.getNBT());
-                registry.put("minecraft:trim_material", MinecraftServer.getTrimManager().getTrimMaterialNBT());
-                registry.put("minecraft:trim_pattern", MinecraftServer.getTrimManager().getTrimPatternNBT());
-                player.sendPacket(new RegistryDataPacket(NBT.Compound(registry)));
+        if (event.willClearChat()) player.sendPacket(new ResetChatPacket());
 
-                player.sendPacket(TagsPacket.DEFAULT_TAGS);
+        // Registry data (if it should be sent)
+        if (event.willSendRegistryData()) {
+            List<SelectKnownPacksPacket.Entry> knownPacks;
+            try {
+                knownPacks = knownPacksFuture.get(ServerFlag.KNOWN_PACKS_RESPONSE_TIMEOUT, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException | TimeoutException e) {
+                LOGGER.warn("Player {} failed to respond to known packs query", player.getUsername());
+                player.getPlayerConnection().disconnect();
+                return;
+            } catch (ExecutionException e) {
+                throw new RuntimeException("Error receiving known packs", e);
             }
+            boolean excludeVanilla = knownPacks.contains(SelectKnownPacksPacket.MINECRAFT_CORE);
 
-            // Wait for pending resource packs if any
-            var packFuture = player.getResourcePackFuture();
-            if (packFuture != null) packFuture.join();
+            Registries registries = MinecraftServer.process();
+            player.sendPacket(registries.chatType().registryDataPacket(registries, excludeVanilla));
+            player.sendPacket(registries.dimensionType().registryDataPacket(registries, excludeVanilla));
+            player.sendPacket(registries.biome().registryDataPacket(registries, excludeVanilla));
+            player.sendPacket(registries.damageType().registryDataPacket(registries, excludeVanilla));
+            player.sendPacket(registries.trimMaterial().registryDataPacket(registries, excludeVanilla));
+            player.sendPacket(registries.trimPattern().registryDataPacket(registries, excludeVanilla));
+            player.sendPacket(registries.bannerPattern().registryDataPacket(registries, excludeVanilla));
+            player.sendPacket(registries.wolfVariant().registryDataPacket(registries, excludeVanilla));
+            player.sendPacket(registries.enchantment().registryDataPacket(registries, excludeVanilla));
+            player.sendPacket(registries.paintingVariant().registryDataPacket(registries, excludeVanilla));
+            player.sendPacket(registries.jukeboxSong().registryDataPacket(registries, excludeVanilla));
 
-            keepAlivePlayers.remove(player);
-            player.setPendingOptions(spawningInstance, event.isHardcore());
-            player.sendPacket(new FinishConfigurationPacket());
-        });
-        if (DebugUtils.INSIDE_TEST) configFuture.join();
+            player.sendPacket(getDefaultTags(registries));
+        }
+
+        // Wait for pending resource packs if any
+        var packFuture = player.getResourcePackFuture();
+        if (packFuture != null) packFuture.join();
+
+        keepAlivePlayers.remove(player);
+        player.setPendingOptions(spawningInstance, event.isHardcore());
+        player.sendPacket(new FinishConfigurationPacket());
     }
 
     @ApiStatus.Internal
@@ -323,8 +310,13 @@ public final class ConnectionManager {
      * Shutdowns the connection manager by kicking all the currently connected players.
      */
     public synchronized void shutdown() {
+        for (final PlayerConnection configPlayer : connectionPlayerMap.keySet())
+            configPlayer.kick(SHUTDOWN_TEXT);
         this.configurationPlayers.clear();
+        for (final Player playPlayer : playPlayers)
+            playPlayer.kick(SHUTDOWN_TEXT);
         this.playPlayers.clear();
+        
         this.keepAlivePlayers.clear();
         this.connectionPlayerMap.clear();
     }
@@ -346,15 +338,21 @@ public final class ConnectionManager {
     @ApiStatus.Internal
     public void updateWaitingPlayers() {
         this.waitingPlayers.drain(player -> {
-            player.getPlayerConnection().setConnectionState(ConnectionState.PLAY);
+            if (!player.isOnline()) return; // Player disconnected while in queued to join
+            configurationPlayers.remove(player);
             playPlayers.add(player);
             keepAlivePlayers.add(player);
+
+            // This fixes a bug with Geyser. They do not reply to keep alive during config, meaning that
+            // `Player#didAnswerKeepAlive()` will always be false when entering the play state, so a new keep
+            // alive will never be sent and they will disconnect themselves or we will kick them for not replying.
+            player.refreshAnswerKeepAlive(true);
 
             // Spawn the player at Player#getRespawnPoint
             CompletableFuture<Void> spawnFuture = player.UNSAFE_init();
 
             // Required to get the exact moment the player spawns
-            if (DebugUtils.INSIDE_TEST) spawnFuture.join();
+            if (ServerFlag.INSIDE_TEST) spawnFuture.join();
         });
     }
 
@@ -367,10 +365,10 @@ public final class ConnectionManager {
         final KeepAlivePacket keepAlivePacket = new KeepAlivePacket(tickStart);
         for (Player player : playerGroup) {
             final long lastKeepAlive = tickStart - player.getLastKeepAlive();
-            if (lastKeepAlive > KEEP_ALIVE_DELAY && player.didAnswerKeepAlive()) {
+            if (lastKeepAlive > ServerFlag.KEEP_ALIVE_DELAY && player.didAnswerKeepAlive()) {
                 player.refreshKeepAlive(tickStart);
                 player.sendPacket(keepAlivePacket);
-            } else if (lastKeepAlive >= KEEP_ALIVE_KICK) {
+            } else if (lastKeepAlive >= ServerFlag.KEEP_ALIVE_KICK) {
                 player.kick(TIMEOUT_TEXT);
             }
         }

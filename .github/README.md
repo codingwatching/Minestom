@@ -31,7 +31,7 @@ Minestom is not installed like Bukkit/Forge/Sponge.
 As Minestom is a Java library, it must be loaded the same way any other Java library may be loaded.
 This means you need to add Minestom as a dependency, add your code and compile by yourself.
 
-Minestom is available on [Maven Central](https://central.sonatype.com/artifact/net.minestom/minestom-snapshots),
+Minestom is available on [Maven Central](https://mvnrepository.com/artifact/net.minestom/minestom-snapshots),
 and can be installed like the following (Gradle/Groovy):
 
 ```groovy
@@ -99,7 +99,7 @@ Commands are the simplest way of communication between clients and server. Since
 
 # Credits
 * The [contributors](https://github.com/Minestom/Minestom/graphs/contributors) of the project
-* [The Minecraft Coalition](https://wiki.vg/) and [`#mcdevs`](https://github.com/mcdevs) -
+* [The Minecraft Coalition](https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge) and [`#mcdevs`](https://github.com/mcdevs) -
    protocol and file formats research.
 * [The Minecraft Wiki](https://minecraft.wiki) for all their useful info
 * [JProfiler](https://www.ej-technologies.com/products/jprofiler/overview.html) for their amazing Java profiler

@@ -1,20 +1,14 @@
 package net.minestom.server.network.packet.server.play;
 
 import net.kyori.adventure.text.Component;
-import net.minestom.server.network.ConnectionState;
 import net.minestom.server.network.NetworkBuffer;
+import net.minestom.server.network.NetworkBufferTemplate;
 import net.minestom.server.network.packet.server.ServerPacket;
-import net.minestom.server.network.packet.server.ServerPacketIdentifier;
 import net.minestom.server.scoreboard.Sidebar;
-import net.minestom.server.utils.PacketUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import static net.minestom.server.network.NetworkBuffer.*;
-
-// public record ClientboundSetScorePacket(String owner, String objectiveName,
-// int score, @Nullable Component display, @Nullable NumberFormat numberFormat) implements Packet<ClientGamePacketListener>
-//{
 
 public record UpdateScorePacket(
         @NotNull String entityName,
@@ -22,26 +16,13 @@ public record UpdateScorePacket(
         int score,
         @Nullable Component displayName,
         @Nullable Sidebar.NumberFormat numberFormat
-) implements ServerPacket {
-    public UpdateScorePacket(@NotNull NetworkBuffer reader) {
-        this(reader.read(STRING), reader.read(STRING), reader.read(VAR_INT),
-                reader.readOptional(COMPONENT), reader.readOptional(Sidebar.NumberFormat::new));
-    }
-
-    @Override
-    public void write(@NotNull NetworkBuffer writer) {
-        writer.write(STRING, entityName);
-        writer.write(STRING, objectiveName);
-        writer.write(VAR_INT, score);
-        writer.writeOptional(COMPONENT, displayName);
-        writer.writeOptional(numberFormat);
-    }
-
-    @Override
-    public int getId(@NotNull ConnectionState state) {
-        return switch (state) {
-            case PLAY -> ServerPacketIdentifier.UPDATE_SCORE;
-            default -> PacketUtils.invalidPacketState(getClass(), state, ConnectionState.PLAY);
-        };
-    }
+) implements ServerPacket.Play {
+    public static final NetworkBuffer.Type<UpdateScorePacket> SERIALIZER = NetworkBufferTemplate.template(
+            STRING, UpdateScorePacket::entityName,
+            STRING, UpdateScorePacket::objectiveName,
+            VAR_INT, UpdateScorePacket::score,
+            COMPONENT.optional(), UpdateScorePacket::displayName,
+            Sidebar.NumberFormat.SERIALIZER.optional(), UpdateScorePacket::numberFormat,
+            UpdateScorePacket::new
+    );
 }

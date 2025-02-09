@@ -1,32 +1,16 @@
 package net.minestom.server.network.packet.server.play;
 
-import net.minestom.server.network.ConnectionState;
 import net.minestom.server.network.NetworkBuffer;
+import net.minestom.server.network.NetworkBufferTemplate;
 import net.minestom.server.network.packet.server.ServerPacket;
-import net.minestom.server.network.packet.server.ServerPacketIdentifier;
-import net.minestom.server.utils.PacketUtils;
-import org.jetbrains.annotations.NotNull;
 
 import static net.minestom.server.network.NetworkBuffer.FLOAT;
 import static net.minestom.server.network.NetworkBuffer.VAR_INT;
 
-public record SetExperiencePacket(float percentage, int level, int totalExperience) implements ServerPacket {
-    public SetExperiencePacket(@NotNull NetworkBuffer reader) {
-        this(reader.read(FLOAT), reader.read(VAR_INT), reader.read(VAR_INT));
-    }
-
-    @Override
-    public void write(@NotNull NetworkBuffer writer) {
-        writer.write(FLOAT, percentage);
-        writer.write(VAR_INT, level);
-        writer.write(VAR_INT, totalExperience);
-    }
-
-    @Override
-    public int getId(@NotNull ConnectionState state) {
-        return switch (state) {
-            case PLAY -> ServerPacketIdentifier.SET_EXPERIENCE;
-            default -> PacketUtils.invalidPacketState(getClass(), state, ConnectionState.PLAY);
-        };
-    }
+public record SetExperiencePacket(float percentage, int level, int totalExperience) implements ServerPacket.Play {
+    public static final NetworkBuffer.Type<SetExperiencePacket> SERIALIZER = NetworkBufferTemplate.template(
+            FLOAT, SetExperiencePacket::percentage,
+            VAR_INT, SetExperiencePacket::level,
+            VAR_INT, SetExperiencePacket::totalExperience,
+            SetExperiencePacket::new);
 }

@@ -2,12 +2,8 @@ package net.minestom.server.network.packet.server.play;
 
 import net.kyori.adventure.text.Component;
 import net.minestom.server.entity.Metadata;
-import net.minestom.server.network.ConnectionState;
 import net.minestom.server.network.NetworkBuffer;
-import net.minestom.server.network.packet.server.ComponentHoldingServerPacket;
 import net.minestom.server.network.packet.server.ServerPacket;
-import net.minestom.server.network.packet.server.ServerPacketIdentifier;
-import net.minestom.server.utils.PacketUtils;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Collection;
@@ -15,27 +11,31 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.function.UnaryOperator;
 
-import static net.minestom.server.network.NetworkBuffer.*;
+import static net.minestom.server.network.NetworkBuffer.BYTE;
+import static net.minestom.server.network.NetworkBuffer.VAR_INT;
 
 public record EntityMetaDataPacket(int entityId,
-                                   @NotNull Map<Integer, Metadata.Entry<?>> entries) implements ComponentHoldingServerPacket {
+                                   @NotNull Map<Integer, Metadata.Entry<?>> entries) implements ServerPacket.Play, ServerPacket.ComponentHolding {
     public EntityMetaDataPacket {
         entries = Map.copyOf(entries);
     }
 
-    public EntityMetaDataPacket(@NotNull NetworkBuffer reader) {
-        this(reader.read(VAR_INT), readEntries(reader));
-    }
-
-    @Override
-    public void write(@NotNull NetworkBuffer writer) {
-        writer.write(VAR_INT, entityId);
-        for (var entry : entries.entrySet()) {
-            writer.write(BYTE, entry.getKey().byteValue());
-            writer.write(entry.getValue());
+    public static final NetworkBuffer.Type<EntityMetaDataPacket> SERIALIZER = new NetworkBuffer.Type<>() {
+        @Override
+        public void write(@NotNull NetworkBuffer buffer, EntityMetaDataPacket value) {
+            buffer.write(VAR_INT, value.entityId);
+            for (Map.Entry<Integer, Metadata.Entry<?>> entry : value.entries.entrySet()) {
+                buffer.write(BYTE, entry.getKey().byteValue());
+                buffer.write(Metadata.Entry.SERIALIZER, entry.getValue());
+            }
+            buffer.write(BYTE, (byte) 0xFF); // End
         }
-        writer.write(BYTE, (byte) 0xFF); // End
-    }
+
+        @Override
+        public EntityMetaDataPacket read(@NotNull NetworkBuffer buffer) {
+            return new EntityMetaDataPacket(buffer.read(VAR_INT), readEntries(buffer));
+        }
+    };
 
     private static Map<Integer, Metadata.Entry<?>> readEntries(@NotNull NetworkBuffer reader) {
         Map<Integer, Metadata.Entry<?>> entries = new HashMap<>();
@@ -44,18 +44,10 @@ public record EntityMetaDataPacket(int entityId,
             if (index == (byte) 0xFF) { // reached the end
                 break;
             }
-            final int type = reader.read(VAR_INT);
-            entries.put((int) index, Metadata.Entry.read(type, reader));
+            Metadata.Entry<?> entry = Metadata.Entry.SERIALIZER.read(reader);
+            entries.put((int) index, entry);
         }
         return entries;
-    }
-
-    @Override
-    public int getId(@NotNull ConnectionState state) {
-        return switch (state) {
-            case PLAY -> ServerPacketIdentifier.ENTITY_METADATA;
-            default -> PacketUtils.invalidPacketState(getClass(), state, ConnectionState.PLAY);
-        };
     }
 
     @Override
@@ -78,12 +70,10 @@ public record EntityMetaDataPacket(int entityId,
 
             if (v instanceof Component c) {
                 var translated = operator.apply(c);
-                entries.put(key, t == Metadata.TYPE_OPTCHAT ? Metadata.OptChat(translated) : Metadata.Chat(translated));
+                entries.put(key, t == Metadata.TYPE_OPT_CHAT ? Metadata.OptChat(translated) : Metadata.Chat(translated));
             } else {
                 entries.put(key, value);
             }
-
-            entries.put(key, v instanceof Component c ? Metadata.Chat(operator.apply(c)) : value);
         });
 
         return new EntityMetaDataPacket(this.entityId, entries);

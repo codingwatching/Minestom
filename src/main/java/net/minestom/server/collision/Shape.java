@@ -1,11 +1,10 @@
 package net.minestom.server.collision;
 
 import net.minestom.server.coordinate.Point;
+import net.minestom.server.entity.Entity;
 import net.minestom.server.instance.block.BlockFace;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 
-@ApiStatus.Experimental
 public interface Shape {
     boolean isOccluded(@NotNull Shape shape, @NotNull BlockFace face);
 
@@ -38,6 +37,17 @@ public interface Shape {
      */
     boolean intersectBoxSwept(@NotNull Point rayStart, @NotNull Point rayDirection,
                               @NotNull Point shapePos, @NotNull BoundingBox moving, @NotNull SweepResult finalResult);
+
+
+    /**
+     * Used to know if this {@link BoundingBox} intersects with the bounding box of an entity.
+     *
+     * @param entity the entity to check the bounding box
+     * @return true if this bounding box intersects with the entity, false otherwise
+     */
+    default boolean intersectEntity(@NotNull Point src, @NotNull Entity entity) {
+        return intersectBox(src.sub(entity.getPosition()), entity.getBoundingBox());
+    }
 
     /**
      * Relative Start

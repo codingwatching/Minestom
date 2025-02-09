@@ -1,67 +1,69 @@
 package net.minestom.server.event.player;
 
-import net.minestom.server.entity.Player;
-import net.minestom.server.event.trait.PlayerEvent;
+import net.minestom.server.event.Event;
+import net.minestom.server.network.player.GameProfile;
+import net.minestom.server.network.player.PlayerConnection;
+import net.minestom.server.network.plugin.LoginPlugin;
+import net.minestom.server.network.plugin.LoginPluginMessageProcessor;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Called before the player initialization, it can be used to kick the player before any connection
  * or to change his final username/uuid.
  */
-public class AsyncPlayerPreLoginEvent implements PlayerEvent {
+public class AsyncPlayerPreLoginEvent implements Event {
 
-    private final Player player;
-    private String username;
-    private UUID playerUuid;
+    private final PlayerConnection connection;
+    private GameProfile gameProfile;
+    private final LoginPluginMessageProcessor pluginMessageProcessor;
 
-    public AsyncPlayerPreLoginEvent(@NotNull Player player) {
-        this.player = player;
-        this.username = player.getUsername();
-        this.playerUuid = player.getUuid();
+    public AsyncPlayerPreLoginEvent(@NotNull PlayerConnection connection,
+                                    @NotNull GameProfile gameProfile,
+                                    @NotNull LoginPluginMessageProcessor pluginMessageProcessor) {
+        this.connection = connection;
+        this.gameProfile = gameProfile;
+        this.pluginMessageProcessor = pluginMessageProcessor;
+    }
+
+    public @NotNull PlayerConnection getConnection() {
+        return connection;
+    }
+
+    public GameProfile getGameProfile() {
+        return gameProfile;
+    }
+
+    public void setGameProfile(GameProfile gameProfile) {
+        this.gameProfile = gameProfile;
     }
 
     /**
-     * Gets the player username.
+     * Sends a login plugin message request. Can be useful to negotiate with modded clients or
+     * proxies before moving on to the Configuration state.
      *
-     * @return the player username
+     * @param channel        the plugin message channel
+     * @param requestPayload the contents of the plugin message, can be null for empty
+     * @return a CompletableFuture for the response. The thread on which it completes is asynchronous.
      */
-    @NotNull
-    public String getUsername() {
-        return username;
+    public @NotNull CompletableFuture<LoginPlugin.Response> sendPluginRequest(String channel, byte[] requestPayload) {
+        return pluginMessageProcessor.request(channel, requestPayload);
     }
 
-    /**
-     * Changes the player username.
-     *
-     * @param username the new player username
-     */
+    @Deprecated
+    public @NotNull String getUsername() {
+        return gameProfile.name();
+    }
+
+    @Deprecated
     public void setUsername(@NotNull String username) {
-        this.username = username;
+        this.gameProfile = new GameProfile(gameProfile.uuid(), username, gameProfile.properties());
     }
 
-    /**
-     * Gets the player uuid.
-     *
-     * @return the player uuid
-     */
-    @NotNull
-    public UUID getPlayerUuid() {
-        return playerUuid;
-    }
-
-    /**
-     * Changes the player uuid.
-     *
-     * @param playerUuid the new player uuid
-     */
-    public void setPlayerUuid(@NotNull UUID playerUuid) {
-        this.playerUuid = playerUuid;
-    }
-
-    @Override
-    public @NotNull Player getPlayer() {
-        return player;
+    @Deprecated
+    public @NotNull UUID getPlayerUuid() {
+        return gameProfile.uuid();
     }
 }

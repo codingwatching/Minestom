@@ -1,12 +1,9 @@
 package net.minestom.server.network.packet.server.play;
 
 import net.kyori.adventure.text.Component;
-import net.minestom.server.network.ConnectionState;
 import net.minestom.server.network.NetworkBuffer;
-import net.minestom.server.network.packet.server.ComponentHoldingServerPacket;
+import net.minestom.server.network.NetworkBufferTemplate;
 import net.minestom.server.network.packet.server.ServerPacket;
-import net.minestom.server.network.packet.server.ServerPacketIdentifier;
-import net.minestom.server.utils.PacketUtils;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Collection;
@@ -17,25 +14,12 @@ import static net.minestom.server.network.NetworkBuffer.COMPONENT;
 import static net.minestom.server.network.NetworkBuffer.VAR_INT;
 
 public record OpenWindowPacket(int windowId, int windowType,
-                               @NotNull Component title) implements ComponentHoldingServerPacket {
-    public OpenWindowPacket(@NotNull NetworkBuffer reader) {
-        this(reader.read(VAR_INT), reader.read(VAR_INT), reader.read(COMPONENT));
-    }
-
-    @Override
-    public void write(@NotNull NetworkBuffer writer) {
-        writer.write(VAR_INT, windowId);
-        writer.write(VAR_INT, windowType);
-        writer.write(COMPONENT, title);
-    }
-
-    @Override
-    public int getId(@NotNull ConnectionState state) {
-        return switch (state) {
-            case PLAY -> ServerPacketIdentifier.OPEN_WINDOW;
-            default -> PacketUtils.invalidPacketState(getClass(), state, ConnectionState.PLAY);
-        };
-    }
+                               @NotNull Component title) implements ServerPacket.Play, ServerPacket.ComponentHolding {
+    public static final NetworkBuffer.Type<OpenWindowPacket> SERIALIZER = NetworkBufferTemplate.template(
+            VAR_INT, OpenWindowPacket::windowId,
+            VAR_INT, OpenWindowPacket::windowType,
+            COMPONENT, OpenWindowPacket::title,
+            OpenWindowPacket::new);
 
     @Override
     public @NotNull Collection<Component> components() {

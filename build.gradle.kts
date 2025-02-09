@@ -13,7 +13,7 @@ plugins {
 version = System.getenv("MINESTOM_VERSION") ?: "dev"
 val channel = System.getenv("MINESTOM_CHANNEL") ?: "local" // local, snapshot, release
 
-val shortDescription = "1.20.4 Lightweight Minecraft server"
+val shortDescription = "1.21 Lightweight Minecraft server"
 
 allprojects {
     apply(plugin = "java")
@@ -23,8 +23,8 @@ allprojects {
     description = shortDescription
 
     repositories {
+        mavenLocal()
         mavenCentral()
-        maven(url = "https://jitpack.io")
     }
 
     configurations.all {
@@ -36,8 +36,7 @@ allprojects {
         withSourcesJar()
         withJavadocJar()
 
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        toolchain.languageVersion = JavaLanguageVersion.of(21)
     }
 
     tasks.withType<Zip> {
@@ -50,6 +49,8 @@ allprojects {
         // Viewable packets make tracking harder. Could be re-enabled later.
         jvmArgs("-Dminestom.viewable-packet=false")
         jvmArgs("-Dminestom.inside-test=true")
+        minHeapSize = "512m"
+        maxHeapSize = "1024m"
     }
 
     tasks.withType<JavaCompile> {
@@ -69,14 +70,9 @@ dependencies {
     api(libs.slf4j)
     api(libs.jetbrainsAnnotations)
     api(libs.bundles.adventure)
-    api(libs.hydrazine)
-    api(libs.bundles.kotlin)
-    api(libs.bundles.hephaistos)
     implementation(libs.minestomData)
-    implementation(libs.dependencyGetter)
 
     // Performance/data structures
-    implementation(libs.caffeine)
     api(libs.fastutil)
     implementation(libs.bundles.flare)
     api(libs.gson)
@@ -99,10 +95,10 @@ tasks {
 
             // Custom options
             addBooleanOption("html5", true)
-            addStringOption("-release", "17")
+            addStringOption("-release", "21")
             // Links to external javadocs
-            links("https://docs.oracle.com/en/java/javase/17/docs/api/")
-            links("https://jd.adventure.kyori.net/api/${libs.versions.adventure.get()}/")
+            links("https://docs.oracle.com/en/java/javase/21/docs/api/")
+            links("https://jd.advntr.dev/api/${libs.versions.adventure.get()}/")
         }
     }
 
@@ -120,7 +116,7 @@ tasks {
         replaceToken("\"&ARTIFACT\"", if (artifact == null) "null" else "\"${artifact}\"", gitFile)
     }
 
-    nexusPublishing{
+    nexusPublishing {
         useStaging.set(true)
         this.packageGroup.set("net.minestom")
 

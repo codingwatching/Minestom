@@ -1,29 +1,13 @@
 package net.minestom.server.network.packet.server.play;
 
-import net.minestom.server.network.ConnectionState;
 import net.minestom.server.network.NetworkBuffer;
+import net.minestom.server.network.NetworkBufferTemplate;
 import net.minestom.server.network.packet.server.ServerPacket;
-import net.minestom.server.network.packet.server.ServerPacketIdentifier;
-import net.minestom.server.utils.PacketUtils;
-import org.jetbrains.annotations.NotNull;
 
 import static net.minestom.server.network.NetworkBuffer.VAR_INT;
 
-public record WorldBorderWarningReachPacket(int warningBlocks) implements ServerPacket {
-    public WorldBorderWarningReachPacket(@NotNull NetworkBuffer reader) {
-        this(reader.read(VAR_INT));
-    }
-
-    @Override
-    public void write(@NotNull NetworkBuffer writer) {
-        writer.write(VAR_INT, warningBlocks);
-    }
-
-    @Override
-    public int getId(@NotNull ConnectionState state) {
-        return switch (state) {
-            case PLAY -> ServerPacketIdentifier.WORLD_BORDER_WARNING_REACH;
-            default -> PacketUtils.invalidPacketState(getClass(), state, ConnectionState.PLAY);
-        };
-    }
+public record WorldBorderWarningReachPacket(int warningBlocks) implements ServerPacket.Play {
+    public static final NetworkBuffer.Type<WorldBorderWarningReachPacket> SERIALIZER = NetworkBufferTemplate.template(
+            VAR_INT, WorldBorderWarningReachPacket::warningBlocks,
+            WorldBorderWarningReachPacket::new);
 }

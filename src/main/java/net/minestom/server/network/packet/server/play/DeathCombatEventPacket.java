@@ -1,38 +1,24 @@
 package net.minestom.server.network.packet.server.play;
 
 import net.kyori.adventure.text.Component;
-import net.minestom.server.network.ConnectionState;
 import net.minestom.server.network.NetworkBuffer;
-import net.minestom.server.network.packet.server.ComponentHoldingServerPacket;
+import net.minestom.server.network.NetworkBufferTemplate;
 import net.minestom.server.network.packet.server.ServerPacket;
-import net.minestom.server.network.packet.server.ServerPacketIdentifier;
-import net.minestom.server.utils.PacketUtils;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Collection;
 import java.util.List;
 import java.util.function.UnaryOperator;
 
-import static net.minestom.server.network.NetworkBuffer.*;
+import static net.minestom.server.network.NetworkBuffer.COMPONENT;
+import static net.minestom.server.network.NetworkBuffer.VAR_INT;
 
-public record DeathCombatEventPacket(int playerId, @NotNull Component message) implements ComponentHoldingServerPacket {
-    public DeathCombatEventPacket(@NotNull NetworkBuffer reader) {
-        this(reader.read(VAR_INT), reader.read(COMPONENT));
-    }
-
-    @Override
-    public void write(@NotNull NetworkBuffer writer) {
-        writer.write(VAR_INT, playerId);
-        writer.write(COMPONENT, message);
-    }
-
-    @Override
-    public int getId(@NotNull ConnectionState state) {
-        return switch (state) {
-            case PLAY -> ServerPacketIdentifier.DEATH_COMBAT_EVENT;
-            default -> PacketUtils.invalidPacketState(getClass(), state, ConnectionState.PLAY);
-        };
-    }
+public record DeathCombatEventPacket(int playerId,
+                                     @NotNull Component message) implements ServerPacket.Play, ServerPacket.ComponentHolding {
+    public static final NetworkBuffer.Type<DeathCombatEventPacket> SERIALIZER = NetworkBufferTemplate.template(
+            VAR_INT, DeathCombatEventPacket::playerId,
+            COMPONENT, DeathCombatEventPacket::message,
+            DeathCombatEventPacket::new);
 
     @Override
     public @NotNull Collection<Component> components() {

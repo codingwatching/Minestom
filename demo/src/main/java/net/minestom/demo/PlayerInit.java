@@ -1,25 +1,21 @@
 package net.minestom.demo;
 
+import net.kyori.adventure.sound.Sound;
 import net.kyori.adventure.text.Component;
+import net.minestom.server.FeatureFlag;
 import net.minestom.server.MinecraftServer;
 import net.minestom.server.advancements.FrameType;
-import net.minestom.server.advancements.notifications.Notification;
-import net.minestom.server.advancements.notifications.NotificationCenter;
+import net.minestom.server.advancements.Notification;
 import net.minestom.server.adventure.MinestomAdventure;
 import net.minestom.server.adventure.audience.Audiences;
 import net.minestom.server.coordinate.Pos;
 import net.minestom.server.coordinate.Vec;
-import net.minestom.server.entity.Entity;
-import net.minestom.server.entity.GameMode;
-import net.minestom.server.entity.ItemEntity;
-import net.minestom.server.entity.Player;
+import net.minestom.server.entity.*;
 import net.minestom.server.entity.damage.Damage;
-import net.minestom.server.entity.fakeplayer.FakePlayer;
 import net.minestom.server.event.Event;
 import net.minestom.server.event.EventNode;
 import net.minestom.server.event.entity.EntityAttackEvent;
-import net.minestom.server.event.item.ItemDropEvent;
-import net.minestom.server.event.item.PickupItemEvent;
+import net.minestom.server.event.item.*;
 import net.minestom.server.event.player.*;
 import net.minestom.server.event.server.ServerTickMonitorEvent;
 import net.minestom.server.instance.Instance;
@@ -27,29 +23,38 @@ import net.minestom.server.instance.InstanceContainer;
 import net.minestom.server.instance.InstanceManager;
 import net.minestom.server.instance.LightingChunk;
 import net.minestom.server.instance.block.Block;
+import net.minestom.server.instance.block.predicate.BlockPredicate;
+import net.minestom.server.instance.block.predicate.BlockTypeFilter;
 import net.minestom.server.inventory.Inventory;
 import net.minestom.server.inventory.InventoryType;
+import net.minestom.server.inventory.PlayerInventory;
+import net.minestom.server.item.ItemAnimation;
+import net.minestom.server.item.ItemComponent;
 import net.minestom.server.item.ItemStack;
 import net.minestom.server.item.Material;
-import net.minestom.server.item.metadata.BundleMeta;
+import net.minestom.server.item.component.BlockPredicates;
+import net.minestom.server.item.component.Consumable;
 import net.minestom.server.monitoring.BenchmarkManager;
 import net.minestom.server.monitoring.TickMonitor;
+import net.minestom.server.network.packet.server.common.CustomReportDetailsPacket;
+import net.minestom.server.network.packet.server.common.ServerLinksPacket;
+import net.minestom.server.sound.SoundEvent;
 import net.minestom.server.utils.MathUtils;
 import net.minestom.server.utils.time.TimeUnit;
-import net.minestom.server.world.DimensionType;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.Random;
-import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class PlayerInit {
 
-    private static final Inventory inventory;
+    private final Inventory inventory;
 
-    private static final EventNode<Event> DEMO_NODE = EventNode.all("demo")
+    private final EventNode<Event> DEMO_NODE = EventNode.all("demo")
             .addListener(EntityAttackEvent.class, event -> {
                 final Entity source = event.getEntity();
                 final Entity entity = event.getTarget();
@@ -84,14 +89,14 @@ public class PlayerInit {
                 itemEntity.setInstance(player.getInstance(), playerPos.withY(y -> y + 1.5));
                 Vec velocity = playerPos.direction().mul(6);
                 itemEntity.setVelocity(velocity);
-
-                FakePlayer.initPlayer(UUID.randomUUID(), "fake123", fp -> {
-                    System.out.println("fp = " + fp);
-                });
             })
             .addListener(PlayerDisconnectEvent.class, event -> System.out.println("DISCONNECTION " + event.getPlayer().getUsername()))
             .addListener(AsyncPlayerConfigurationEvent.class, event -> {
                 final Player player = event.getPlayer();
+
+                // Show off adding and removing feature flags
+                event.addFeatureFlag(FeatureFlag.WINTER_DROP);
+                event.removeFeatureFlag(FeatureFlag.TRADE_REBALANCE); // not enabled by default, just removed for demonstration
 
                 var instances = MinecraftServer.getInstanceManager().getInstances();
                 Instance instance = instances.stream().skip(new Random().nextInt(instances.size())).findFirst().orElse(null);
@@ -106,66 +111,110 @@ public class PlayerInit {
                 player.setPermissionLevel(4);
                 ItemStack itemStack = ItemStack.builder(Material.STONE)
                         .amount(64)
-                        .meta(itemMetaBuilder ->
-                                itemMetaBuilder.canPlaceOn(Set.of(Block.STONE))
-                                        .canDestroy(Set.of(Block.DIAMOND_ORE)))
+                        .set(ItemComponent.CAN_PLACE_ON, new BlockPredicates(new BlockPredicate(new BlockTypeFilter.Blocks(Block.STONE), null, null)))
+                        .set(ItemComponent.CAN_BREAK, new BlockPredicates(new BlockPredicate(new BlockTypeFilter.Blocks(Block.DIAMOND_ORE), null, null)))
                         .build();
                 player.getInventory().addItemStack(itemStack);
 
+                player.sendPacket(new CustomReportDetailsPacket(Map.of(
+                        "hello", "world"
+                )));
+
+                player.sendPacket(new ServerLinksPacket(
+                        new ServerLinksPacket.Entry(ServerLinksPacket.KnownLinkType.NEWS, "https://minestom.net"),
+                        new ServerLinksPacket.Entry(ServerLinksPacket.KnownLinkType.BUG_REPORT, "https://minestom.net"),
+                        new ServerLinksPacket.Entry(Component.text("Hello world!"), "https://minestom.net")
+                ));
+
+                // TODO(1.21.2): Handle bundle slot selection
                 ItemStack bundle = ItemStack.builder(Material.BUNDLE)
-                        .meta(BundleMeta.class, bundleMetaBuilder -> {
-                            bundleMetaBuilder.addItem(ItemStack.of(Material.DIAMOND, 5));
-                            bundleMetaBuilder.addItem(ItemStack.of(Material.RABBIT_FOOT, 5));
-                        })
+                        .set(ItemComponent.BUNDLE_CONTENTS, List.of(
+                                ItemStack.of(Material.DIAMOND, 5),
+                                ItemStack.of(Material.RABBIT_FOOT, 5)
+                        ))
                         .build();
                 player.getInventory().addItemStack(bundle);
 
+                player.setGameMode(GameMode.SURVIVAL);
+                PlayerInventory inventory = event.getPlayer().getInventory();
+                inventory.addItemStack(getFoodItem(20));
+                inventory.addItemStack(getFoodItem(10000));
+                inventory.addItemStack(getFoodItem(Integer.MAX_VALUE));
+
                 if (event.isFirstSpawn()) {
-                    Notification notification = new Notification(
+                    event.getPlayer().sendNotification(new Notification(
                             Component.text("Welcome!"),
                             FrameType.TASK,
                             Material.IRON_SWORD
-                    );
-                    NotificationCenter.send(notification, event.getPlayer());
+                    ));
+
+                    player.playSound(Sound.sound(SoundEvent.ENTITY_EXPERIENCE_ORB_PICKUP, Sound.Source.PLAYER, 0.5f, 1f));
                 }
             })
             .addListener(PlayerPacketOutEvent.class, event -> {
                 //System.out.println("out " + event.getPacket().getClass().getSimpleName());
             })
             .addListener(PlayerPacketEvent.class, event -> {
+
                 //System.out.println("in " + event.getPacket().getClass().getSimpleName());
             })
             .addListener(PlayerUseItemOnBlockEvent.class, event -> {
-                if (event.getHand() != Player.Hand.MAIN) return;
+                if (event.getHand() != PlayerHand.MAIN) return;
 
                 var itemStack = event.getItemStack();
                 var block = event.getInstance().getBlock(event.getPosition());
 
-                if ("false" .equals(block.getProperty("waterlogged")) && itemStack.material().equals(Material.WATER_BUCKET)) {
+                if ("false".equals(block.getProperty("waterlogged")) && itemStack.material().equals(Material.WATER_BUCKET)) {
                     block = block.withProperty("waterlogged", "true");
-                } else if ("true" .equals(block.getProperty("waterlogged")) && itemStack.material().equals(Material.BUCKET)) {
+                } else if ("true".equals(block.getProperty("waterlogged")) && itemStack.material().equals(Material.BUCKET)) {
                     block = block.withProperty("waterlogged", "false");
                 } else return;
 
                 event.getInstance().setBlock(event.getPosition(), block);
 
             })
-            .addListener(PlayerBlockPlaceEvent.class, event -> {
-//                event.setDoBlockUpdates(false);
+            .addListener(PlayerBeginItemUseEvent.class, event -> {
+                final Player player = event.getPlayer();
+                final ItemStack itemStack = event.getItemStack();
+                final boolean hasProjectile = !itemStack.get(ItemComponent.CHARGED_PROJECTILES, List.of()).isEmpty();
+                if (itemStack.material() == Material.CROSSBOW && hasProjectile) {
+                    // "shoot" the arrow
+                    player.setItemInHand(event.getHand(), itemStack.without(ItemComponent.CHARGED_PROJECTILES));
+                    event.getPlayer().sendMessage("pew pew!");
+                    event.setItemUseDuration(0); // Do not start using the item
+                    return;
+                }
+            })
+            .addListener(PlayerFinishItemUseEvent.class, event -> {
+                if (event.getItemStack().material() == Material.APPLE) {
+                    event.getPlayer().sendMessage("yummy yummy apple");
+                }
+            })
+            .addListener(PlayerCancelItemUseEvent.class, event -> {
+                final Player player = event.getPlayer();
+                final ItemStack itemStack = event.getItemStack();
+                if (itemStack.material() == Material.CROSSBOW && event.getUseDuration() > 25) {
+                    player.setItemInHand(event.getHand(), itemStack.with(ItemComponent.CHARGED_PROJECTILES, List.of(ItemStack.of(Material.ARROW))));
+                    return;
+                }
             })
             .addListener(PlayerBlockInteractEvent.class, event -> {
                 var block = event.getBlock();
                 var rawOpenProp = block.getProperty("open");
-                if (rawOpenProp == null) return;
+                if (rawOpenProp != null) {
+                    block = block.withProperty("open", String.valueOf(!Boolean.parseBoolean(rawOpenProp)));
+                    event.getInstance().setBlock(event.getBlockPosition(), block);
+                }
 
-                block = block.withProperty("open", String.valueOf(!Boolean.parseBoolean(rawOpenProp)));
-                event.getInstance().setBlock(event.getBlockPosition(), block);
+                if (block.id() == Block.CRAFTING_TABLE.id()) {
+                    event.getPlayer().openInventory(new Inventory(InventoryType.CRAFTING, "Crafting"));
+                }
             });
 
-    static {
+    {
         InstanceManager instanceManager = MinecraftServer.getInstanceManager();
 
-        InstanceContainer instanceContainer = instanceManager.createInstanceContainer(DimensionType.OVERWORLD);
+        InstanceContainer instanceContainer = instanceManager.createInstanceContainer();
         instanceContainer.setGenerator(unit -> {
             unit.modifier().fillHeight(0, 40, Block.STONE);
 
@@ -175,31 +224,15 @@ public class PlayerInit {
         });
         instanceContainer.setChunkSupplier(LightingChunk::new);
         instanceContainer.setTimeRate(0);
-        instanceContainer.setTime(18000);
-
-//        var i2 = new InstanceContainer(UUID.randomUUID(), DimensionType.OVERWORLD, null, NamespaceID.from("minestom:demo"));
-//        instanceManager.registerInstance(i2);
-//        i2.setGenerator(unit -> unit.modifier().fillHeight(0, 40, Block.GRASS_BLOCK));
-//        i2.setChunkSupplier(LightingChunk::new);
-
-        // System.out.println("start");
-        // var chunks = new ArrayList<CompletableFuture<Chunk>>();
-        // ChunkUtils.forChunksInRange(0, 0, 32, (x, z) -> chunks.add(instanceContainer.loadChunk(x, z)));
-
-        // CompletableFuture.runAsync(() -> {
-        //     CompletableFuture.allOf(chunks.toArray(CompletableFuture[]::new)).join();
-        //     System.out.println("load end");
-        //     LightingChunk.relight(instanceContainer, instanceContainer.getChunks());
-        //     System.out.println("light end");
-        // });
+        instanceContainer.setTime(12000);
 
         inventory = new Inventory(InventoryType.CHEST_1_ROW, Component.text("Test inventory"));
         inventory.setItemStack(3, ItemStack.of(Material.DIAMOND, 34));
     }
 
-    private static final AtomicReference<TickMonitor> LAST_TICK = new AtomicReference<>();
+    private final AtomicReference<TickMonitor> LAST_TICK = new AtomicReference<>();
 
-    public static void init() {
+    public void init() {
         var eventHandler = MinecraftServer.getGlobalEventHandler();
         eventHandler.addChild(DEMO_NODE);
 
@@ -210,7 +243,7 @@ public class PlayerInit {
 
         BenchmarkManager benchmarkManager = MinecraftServer.getBenchmarkManager();
         MinecraftServer.getSchedulerManager().buildTask(() -> {
-            if (MinecraftServer.getConnectionManager().getOnlinePlayerCount() != 0)
+            if (LAST_TICK.get() == null || MinecraftServer.getConnectionManager().getOnlinePlayerCount() == 0)
                 return;
 
             long ramUsage = benchmarkManager.getUsedMemory();
@@ -224,6 +257,18 @@ public class PlayerInit {
                     .append(Component.text("ACQ TIME: " + MathUtils.round(tickMonitor.getAcquisitionTime(), 2) + "ms"));
             final Component footer = benchmarkManager.getCpuMonitoringMessage();
             Audiences.players().sendPlayerListHeaderAndFooter(header, footer);
-        }).repeat(10, TimeUnit.SERVER_TICK); //.schedule();
+        }).repeat(10, TimeUnit.SERVER_TICK).schedule();
+    }
+
+    public static ItemStack getFoodItem(int consumeTicks) {
+        return ItemStack.builder(Material.IRON_NUGGET)
+                .amount(64)
+                .set(ItemComponent.CONSUMABLE, new Consumable(
+                        (float) consumeTicks / 20,
+                        ItemAnimation.EAT,
+                        SoundEvent.BLOCK_CHAIN_STEP,
+                        true,
+                        new ArrayList<>()))
+                .build();
     }
 }

@@ -1,5 +1,6 @@
 package net.minestom.server.listener;
 
+import net.minestom.server.entity.GameMode;
 import net.minestom.server.entity.Player;
 import net.minestom.server.inventory.PlayerInventory;
 import net.minestom.server.item.ItemStack;
@@ -10,7 +11,7 @@ import java.util.Objects;
 
 public final class CreativeInventoryActionListener {
     public static void listener(ClientCreativeInventoryActionPacket packet, Player player) {
-        if (!player.isCreative()) return;
+        if (player.getGameMode() != GameMode.CREATIVE) return;
         short slot = packet.slot();
         final ItemStack item = packet.item();
         if (slot == -1) {
@@ -18,8 +19,13 @@ public final class CreativeInventoryActionListener {
             player.dropItem(item);
             return;
         }
+        // Bounds check
+        // 0 is crafting result inventory slot, ignore attempts to place into it
+        if (slot < 1 || slot > PlayerInventoryUtils.OFFHAND_SLOT) {
+            return;
+        }
         // Set item
-        slot = (short) PlayerInventoryUtils.convertPlayerInventorySlot(slot, PlayerInventoryUtils.OFFSET);
+        slot = (short) PlayerInventoryUtils.convertWindow0SlotToMinestomSlot(slot);
         PlayerInventory inventory = player.getInventory();
         if (Objects.equals(inventory.getItemStack(slot), item)) {
             // Item is already present, ignore

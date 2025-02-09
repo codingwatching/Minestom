@@ -1,12 +1,14 @@
 package net.minestom.server.entity;
 
-import net.minestom.testing.Env;
-import net.minestom.testing.EnvTest;
+import net.minestom.server.coordinate.CoordConversion;
 import net.minestom.server.coordinate.Pos;
 import net.minestom.server.coordinate.Vec;
 import net.minestom.server.instance.Instance;
+import net.minestom.server.instance.block.Block;
 import net.minestom.server.network.packet.server.play.EntityVelocityPacket;
 import net.minestom.server.utils.chunk.ChunkUtils;
+import net.minestom.testing.Env;
+import net.minestom.testing.EnvTest;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.atomic.AtomicInteger;
@@ -109,7 +111,7 @@ public class EntityVelocityIntegrationTest {
         var player = env.createPlayer(instance, new Pos(0, 42, 0));
         env.tick();
 
-        final double epsilon = 0.00001;
+        final double epsilon = 0.000001;
 
         assertEquals(player.getVelocity().y(), -1.568, epsilon);
         double previousVelocity = player.getVelocity().y();
@@ -118,7 +120,7 @@ public class EntityVelocityIntegrationTest {
         env.tick();
 
         // Every tick, the y velocity is multiplied by 0.6, and after 27 ticks it should be 0
-        for (int i = 0; i < 27; i++) {
+        for (int i = 0; i < 22; i++) {
             assertEquals(player.getVelocity().y(), previousVelocity * 0.6, epsilon);
             previousVelocity = player.getVelocity().y();
             env.tick();
@@ -133,7 +135,7 @@ public class EntityVelocityIntegrationTest {
         var player = env.createPlayer(instance, new Pos(0, 42, 0));
         player.setFlying(true);
         var witness = env.createConnection();
-        witness.connect(instance, new Pos(0, 42, 0)).join();
+        witness.connect(instance, new Pos(0, 42, 0));
 
         var tracker = witness.trackIncoming(EntityVelocityPacket.class);
         env.tick(); // Process gravity velocity
@@ -150,6 +152,7 @@ public class EntityVelocityIntegrationTest {
         assertFalse(entity.hasVelocity());
 
         entity.setInstance(instance, new Pos(0, 41, 0)).join();
+        entity.setVelocity(new Vec(0, -10, 0));
 
         env.tick();
 
@@ -157,7 +160,10 @@ public class EntityVelocityIntegrationTest {
         // Only entities on the ground should ignore the default velocity.
         assertTrue(entity.hasVelocity());
 
-        env.tick();
+        // Tick entity so it falls on the ground
+        for (int i = 0; i < 5; i++) {
+            entity.tick(0);
+        }
 
         // Now that the entity is on the ground, it should no longer have a velocity.
         assertFalse(entity.hasVelocity());
@@ -165,20 +171,18 @@ public class EntityVelocityIntegrationTest {
 
     @Test
     public void countVelocityPackets(Env env) {
-        final int VELOCITY_UPDATE_INTERVAL = 1;
-
         var instance = env.createFlatInstance();
         var viewerConnection = env.createConnection();
-        viewerConnection.connect(instance, new Pos(1, 40, 1)).join();
+        viewerConnection.connect(instance, new Pos(1, 40, 1));
         var entity = new Entity(EntityType.ZOMBIE);
-        entity.setInstance(instance, new Pos(0,40,0)).join();
+        entity.setInstance(instance, new Pos(0, 40, 0)).join();
+        instance.setBlock(new Vec(0, 39, 0), Block.STONE);
+        env.tick(); // Tick because the entity is in the air, they'll send velocity from gravity
 
         AtomicInteger i = new AtomicInteger();
-        BooleanSupplier tickLoopCondition = () -> i.getAndIncrement() < Math.max(VELOCITY_UPDATE_INTERVAL, 1);
+        BooleanSupplier tickLoopCondition = () -> i.getAndIncrement() < Math.max(entity.getSynchronizationTicks() - 1, 19);
 
         var tracker = viewerConnection.trackIncoming(EntityVelocityPacket.class);
-        env.tickWhile(tickLoopCondition, null);
-        tracker.assertEmpty(); // Verify no updates are sent while the entity is not moving
 
         entity.setVelocity(new Vec(0, 5, 0));
         tracker = viewerConnection.trackIncoming(EntityVelocityPacket.class);
@@ -199,15 +203,15 @@ public class EntityVelocityIntegrationTest {
 
     private void loadChunks(Instance instance) {
         ChunkUtils.optionalLoadAll(instance, new long[]{
-                ChunkUtils.getChunkIndex(-1, -1),
-                ChunkUtils.getChunkIndex(-1, 0),
-                ChunkUtils.getChunkIndex(-1, 1),
-                ChunkUtils.getChunkIndex(0, -1),
-                ChunkUtils.getChunkIndex(0, 0),
-                ChunkUtils.getChunkIndex(0, 1),
-                ChunkUtils.getChunkIndex(1, -1),
-                ChunkUtils.getChunkIndex(1, 0),
-                ChunkUtils.getChunkIndex(1, 1),
+                CoordConversion.chunkIndex(-1, -1),
+                CoordConversion.chunkIndex(-1, 0),
+                CoordConversion.chunkIndex(-1, 1),
+                CoordConversion.chunkIndex(0, -1),
+                CoordConversion.chunkIndex(0, 0),
+                CoordConversion.chunkIndex(0, 1),
+                CoordConversion.chunkIndex(1, -1),
+                CoordConversion.chunkIndex(1, 0),
+                CoordConversion.chunkIndex(1, 1),
         }, null).join();
     }
 }

@@ -1,35 +1,19 @@
 package net.minestom.server.network.packet.server.play;
 
-import net.minestom.server.network.ConnectionState;
 import net.minestom.server.network.NetworkBuffer;
+import net.minestom.server.network.NetworkBufferTemplate;
 import net.minestom.server.network.packet.server.ServerPacket;
-import net.minestom.server.network.packet.server.ServerPacketIdentifier;
-import net.minestom.server.utils.PacketUtils;
-import org.jetbrains.annotations.NotNull;
 
-import static net.minestom.server.network.NetworkBuffer.*;
+import static net.minestom.server.network.NetworkBuffer.LONG;
+import static net.minestom.server.network.NetworkBuffer.VAR_LONG_ARRAY;
 
-public record MultiBlockChangePacket(long chunkSectionPosition, long[] blocks) implements ServerPacket {
-    public MultiBlockChangePacket(int chunkX, int section, int chunkZ,
-                                  long[] blocks) {
+public record MultiBlockChangePacket(long chunkSectionPosition, long[] blocks) implements ServerPacket.Play {
+    public static final NetworkBuffer.Type<MultiBlockChangePacket> SERIALIZER = NetworkBufferTemplate.template(
+            LONG, MultiBlockChangePacket::chunkSectionPosition,
+            VAR_LONG_ARRAY, MultiBlockChangePacket::blocks,
+            MultiBlockChangePacket::new);
+
+    public MultiBlockChangePacket(int chunkX, int section, int chunkZ, long[] blocks) {
         this(((long) (chunkX & 0x3FFFFF) << 42) | (section & 0xFFFFF) | ((long) (chunkZ & 0x3FFFFF) << 20), blocks);
-    }
-
-    public MultiBlockChangePacket(@NotNull NetworkBuffer reader) {
-        this(reader.read(LONG), reader.read(VAR_LONG_ARRAY));
-    }
-
-    @Override
-    public void write(@NotNull NetworkBuffer writer) {
-        writer.write(LONG, chunkSectionPosition);
-        writer.write(VAR_LONG_ARRAY, blocks);
-    }
-
-    @Override
-    public int getId(@NotNull ConnectionState state) {
-        return switch (state) {
-            case PLAY -> ServerPacketIdentifier.MULTI_BLOCK_CHANGE;
-            default -> PacketUtils.invalidPacketState(getClass(), state, ConnectionState.PLAY);
-        };
     }
 }
